@@ -1,0 +1,141 @@
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import OneHotEncoder
+from sklearn.compose import ColumnTransformer
+from sklearn.pipeline import Pipeline
+from sklearn.ensemble import RandomForestRegressor
+import heapq
+
+
+# =========================
+# 1. TRAINING PHASE
+# =========================
+
+# Load historical data with outcomes
+# Expected columns in orders_history_with_outcomes.csv:
+# - order_id
+# - profit_if_won
+# - realized_profit
+# - days_left_at_assignment
+# - relationship_score
+# - feasibility_score
+# - order_size
+# - client_type
+# - sector
+# - late_flag           (0 or 1)
+# - lost_client_flag    (0 or 1)
+
+df = pd.read_csv("orders_history_with_outcomes.csv")
+
+# ---- 1a. Compute business_value (label) ----
+lambda_late = 100000      # penalty for late delivery
+lambda_churn = 300000     # penalty for losing a client
+
+df["business_value"] = (
+    df["realized_profit"]
+    - lambda_late * df["late_flag"]
+    - lambda_churn * df["lost_client_flag"]
+)
+
+# ---- 1b. Define features ----
+numeric_features = [
+    "profit_if_won",
+    "days_left_at_assignment",
+    "relationship_score",
+    "feasibility_score",
+    "order_size",
+]
+
+categorical_features = [
+    "client_type",
+    "sector",
+]
+
+X = df[numeric_features + categorical_features]
+y = df["business_value"]
+
+# ---- 1c. Preprocessing: numeric + one-hot for categoricals ----
+preprocessor = ColumnTransformer(
+    transformers=[
+        ("num", "passthrough", numeric_features),
+        ("cat", OneHotEncoder(handle_unknown="ignore"), categorical_features),
+    ]
+)
+
+# ---- 1d. Priority model: Random Forest Regressor ----
+priority_model = Pipeline(
+    steps=[
+        ("preprocessor", preprocessor),
+        ("regressor", RandomForestRegressor(
+            n_estimators=200,
+            random_state=42
+        ))
+    ]
+)
+
+# ---- 1e. Train-test split and training ----
+X_train, X_test, y_train, y_test = train_test_split(
+    X, y, test_size=0.2, random_state=42
+)
+
+priority_model.fit(X_train, y_train)
+
+
+# =========================
+# 2. INFERENCE PHASE (NEW ORDERS)
+# =========================
+
+# Load new incoming orders to prioritize
+# Expected columns in new_orders.csv:
+# - order_id
+# - profit_if_won
+# - days_left_at_assignment
+# - relationship_score
+# - feasibility_score
+# - order_size
+# - client_type
+# - sector
+
+new_orders = pd.read_csv("new_orders.csv")
+
+# ---- 2a. Prepare features for model ----
+X_new = new_orders[numeric_features + categorical_features]
+
+# ---- 2b. Predict PriorityScore ≈ business_value ----
+new_orders["PriorityScore"] = priority_model.predict(X_new)
+
+
+# =========================
+# 3. BUILD PRIORITY QUEUE (DSA PART)
+# =========================
+
+# Max-priority queue using heapq (min-heap with negative score)
+pq = []   # each element: (-PriorityScore, index)
+
+for idx, score in enumerate(new_orders["PriorityScore"]):
+    heapq.heappush(pq, (-score, idx))
+
+
+# =========================
+# 4. HOW TO USE THE QUEUE
+# =========================
+# When you want the next highest-priority order:
+# neg_score, idx = heapq.heappop(pq)
+# priority = -neg_score
+# order_row = new_orders.iloc[idx]
+# Now `order_row` is the next best order to process.
+# (No printing is done in this script; everything is just computed.)
+
+
+
+# =========================
+# 5. SAVE PRIORITIZED ORDERS TO CSV
+# =========================
+
+# Sort by PriorityScore (highest first)
+new_orders_sorted = new_orders.sort_values(by="PriorityScore", ascending=False)
+
+# Keep only what you want in the output CSV
+output_cols = ["order_id", "PriorityScore"]
+new_orders_sorted[output_cols].to_csv("prioritized_orders.csv", index=False)
+
