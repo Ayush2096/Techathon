@@ -4,7 +4,7 @@
     "test_id": "TEST-RT-001",
     "test_name": "Conductor Resistance Test",
     "test_category": "Routine Test",
-    "standard_ref": "IS 8130 / IS 7098",
+    "standard_ref": "IS 8130,
     "description": "Measures DC resistance of conductor to ensure copper/aluminum purity and area.",
     "mandatory_for": ["All Cables"],
     "base_test_cost": 500.0,
